@@ -10,29 +10,14 @@
 template <class T>
 class PVector
 {
-private:
-    T *__elements;
-    uint64_t __size = 0;
-    uint64_t __capacity = 0;
-    const unsigned __hardware_concurrency = std::thread::hardware_concurrency();
-
 public:
     static constexpr uint64_t npos = -1;
 
-    explicit PVector(const uint64_t &init_size = 0, const T &fill = T()):
+    PVector(uint64_t init_size = 0, const T &fill = T(), unsigned threads = std::thread::hardware_concurrency()):
     __size(init_size),
-    __capacity(init_size) //initialisation before counting real value
+    __capacity(init_size == 0 ? 1 : init_size),
+    __hardware_concurrency(threads)
     {
-        if ((__capacity & (__capacity - 1)) != 0 && __capacity != 0) //300 iq capacity computation
-        {
-            __capacity |= __capacity >> 1;
-            __capacity |= __capacity >> 2;
-            __capacity |= __capacity >> 4;
-            __capacity |= __capacity >> 8;
-            __capacity |= __capacity >> 16;
-            __capacity |= __capacity >> 32;
-            ++__capacity;
-        }
         this->__elements = new T[__capacity];
 
         for (T *it = __elements; it != __elements + init_size; ++it)
@@ -64,12 +49,17 @@ public:
     uint64_t size() const noexcept {return this->__size;}
     bool empty() const noexcept {return this->__size != 0;}
     uint64_t capacity() const noexcept {return this->__capacity;}
+    unsigned threads() const noexcept {return this->__hardware_concurrency;}
+    void setThreads(unsigned threads) noexcept {this->__hardware_concurrency = threads;}
 
     T front() const {return this->__elements[0];}
     T& front() {return this->__elements[0];}
 
     T back() const {return this->__elements[this->__size - 1];}
     T& back() {return this->__elements[this->__size - 1];}
+
+    T* begin() const {return this->__elements;}
+    T* end() const {return this->__elements + this->__size;}
 
     T operator[](const uint64_t &index) const {return this->__elements[index];}
     T& operator[](const uint64_t &index) {return this->__elements[index];}
@@ -87,8 +77,12 @@ public:
 
     void pop_back()
     {
+        if (this->__size == 0) return;
         if (this->__size-- == (this->__capacity >> 1) + 1)
-            this->__elements = (T*)std::realloc(this->__elements, (this->__capacity >>= 1) * sizeof(T));
+        {
+            if (this->__capacity != 1)
+                this->__elements = (T*)std::realloc(this->__elements, (this->__capacity >>= 1) * sizeof(T));
+        }
     }
 
     void pop_back(T &ref)
@@ -97,6 +91,23 @@ public:
         if (this->__size == (this->__capacity >> 1) + 1)
             this->__elements = (T*)std::realloc(this->__elements, (this->__capacity >>= 1) * sizeof(T));
     }
+
+    void insert(const T &value, uint64_t pos)
+    {
+        this->push_back(this->back());
+        for (uint64_t i = this->__size - 2; i > pos; --i)
+            this->__elements[i] = this->__elements[i - 1];
+        this->__elements[pos] = value;
+    }
+
+    void erase(uint64_t pos)
+    {
+        for (uint64_t i = pos; i < this->__size; ++i)
+            this->__elements[i] = this->__elements[i + 1];
+        this->pop_back();
+    }
+
+    void eraseValues(const T &value);
 
     uint64_t find(const T &value)
     {
@@ -315,6 +326,12 @@ public:
     {
         return (*std::max_element(this->__elements, this->__elements + this->__size));
     }
+
+private:
+    T *__elements;
+    uint64_t __size;
+    uint64_t __capacity;
+    unsigned __hardware_concurrency;
 };
 
 #endif // PVECTOR_H
