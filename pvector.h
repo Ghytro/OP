@@ -3,8 +3,9 @@
 
 #include <cstdint>
 #include <cstdlib>
-#include <new>
 #include <thread>
+#include <algorithm>
+#include <numeric>
 
 template <class T>
 class PVector
@@ -13,6 +14,7 @@ private:
     T *__elements;
     uint64_t __size = 0;
     uint64_t __capacity = 0;
+    const unsigned __hardware_concurrency = std::thread::hardware_concurrency();
 
 public:
     static constexpr uint64_t npos = -1;
@@ -121,13 +123,197 @@ public:
         return index;
     }
 
+    bool contains(const T &value) {return this->find(value) != PVector::npos;}
+
     //only for benchmarks, delete in final version
     uint64_t find_singlethread(const T &value)
     {
-        for (uint64_t i = 0; i < this->__size; ++i)
-            if (this->__elements[i] == value)
-                return i;
-        return PVector::npos;
+        T *it = std::find(this->__elements, this->__elements + this->__size, value);
+        if (it == this->__elements + this->__size)
+            return PVector::npos;
+        return it - this->__elements;
+    }
+
+    T accumulate(const T &init_value = T())
+    {
+        auto accumulate_interval = [&](uint64_t start, T &ans, const T &init_value) {
+            T result = init_value;
+            for (uint64_t i = start; i < this->__size; i += this->__hardware_concurrency)
+                result  = result + this->__elements[i];
+            ans = result;
+        };
+
+        T *temp_answers = new T[this->__hardware_concurrency];
+        std::thread *workers = new std::thread[this->__hardware_concurrency];
+
+        for (unsigned i = 0; i < this->__hardware_concurrency; ++i)
+            workers[i] = std::thread(accumulate_interval, i, std::ref(temp_answers[i]), std::cref(init_value));
+        for (unsigned i = 0; i < this->__hardware_concurrency; ++i)
+            workers[i].join();
+
+        T result = init_value;
+        for (unsigned i = 0; i < this->__hardware_concurrency; ++i)
+            result = result + temp_answers[i];
+
+        delete[] temp_answers;
+        delete[] workers;
+        return result;
+    }
+
+    template <class Operation>
+    T accumulate(Operation op, const T &init_value = T())
+    {
+        auto accumulate_interval = [&](uint64_t start, T &ans, const T &init_value) {
+            T result = init_value;
+            for (uint64_t i = start; i < this->__size; i += this->__hardware_concurrency)
+                result  = op(result, this->__elements[i]);
+            ans = result;
+        };
+
+        T *temp_answers = new T[this->__hardware_concurrency];
+        std::thread *workers = new std::thread[this->__hardware_concurrency];
+
+        for (unsigned i = 0; i < this->__hardware_concurrency; ++i)
+            workers[i] = std::thread(accumulate_interval, i, std::ref(temp_answers[i]), std::cref(init_value));
+        for (unsigned i = 0; i < this->__hardware_concurrency; ++i)
+            workers[i].join();
+
+        T result = init_value;
+        for (unsigned i = 0; i < this->__hardware_concurrency; ++i)
+            result = op(result, temp_answers[i]);
+
+        delete[] temp_answers;
+        delete[] workers;
+        return result;
+    }
+
+    T accumulate_singlethread(const T &init_value = T())
+    {
+        return std::accumulate(this->__elements, this->__elements + this->__size, init_value);
+    }
+
+    T min()
+    {
+        auto find_min = [&](uint64_t start, T &ans) {
+            T result = this->__elements[0];
+            for (uint64_t i = start; i < this->__size; i += this->__hardware_concurrency)
+                if (this->__elements[i] < result)
+                    result = this->__elements[i];
+            ans = result;
+        };
+
+        T *results = new T[this->__hardware_concurrency];
+        std::thread *workers = new std::thread[this->__hardware_concurrency];
+
+        for (unsigned i = 0; i < this->__hardware_concurrency; ++i)
+            workers[i] = std::thread(find_min, i, std::ref(results[i]));
+        for (unsigned i = 0; i < this->__hardware_concurrency; ++i)
+            workers[i].join();
+
+        T result = results[0];
+        for (unsigned i = 1; i < this->__hardware_concurrency; ++i)
+            if (results[i] < result)
+                result = results[i];
+
+        delete[] results;
+        delete[] workers;
+        return result;
+    }
+
+    template <class Operation>
+    T min(Operation op)
+    {
+        auto find_min = [&](uint64_t start, T &ans) {
+            T result = this->__elements[start];
+            for (uint64_t i = start; i < this->__size; i += this->__hardware_concurrency)
+                if (op(this->__elements[i], result))
+                    result = this->__elements[i];
+            ans = result;
+        };
+
+        T *results = new T[this->__hardware_concurrency];
+        std::thread *workers = new std::thread[this->__hardware_concurrency];
+
+        for (unsigned i = 0; i < this->__hardware_concurrency; ++i)
+            workers[i] = std::thread(find_min, i, std::ref(results[i]));
+        for (unsigned i = 0; i < this->__hardware_concurrency; ++i)
+            workers[i].join();
+
+        T result = results[0];
+        for (unsigned i = 1; i < this->__hardware_concurrency; ++i)
+            if (op(results[i], result))
+                result = results[i];
+
+        delete[] results;
+        delete[] workers;
+        return result;
+    }
+
+    T min_singlethread()
+    {
+        return (*std::min_element(this->__elements, this->__elements + this->__size));
+    }
+
+    T max()
+    {
+        auto find_max = [&](uint64_t start, T &ans) {
+            T result = this->__elements[0];
+            for (uint64_t i = start; i < this->__size; i += this->__hardware_concurrency)
+                if (this->__elements[i] > result)
+                    result = this->__elements[i];
+            ans = result;
+        };
+
+        T *results = new T[this->__hardware_concurrency];
+        std::thread *workers = new std::thread[this->__hardware_concurrency];
+
+        for (unsigned i = 0; i < this->__hardware_concurrency; ++i)
+            workers[i] = std::thread(find_max, i, std::ref(results[i]));
+        for (unsigned i = 0; i < this->__hardware_concurrency; ++i)
+            workers[i].join();
+
+        T result = results[0];
+        for (unsigned i = 1; i < this->__hardware_concurrency; ++i)
+            if (results[i] > result)
+                result = results[i];
+
+        delete[] results;
+        delete[] workers;
+        return result;
+    }
+
+    template <class Operation>
+    T max(Operation op)
+    {
+        auto find_max = [&](uint64_t start, T &ans) {
+            T result = this->__elements[0];
+            for (uint64_t i = start; i < this->__size; i += this->__hardware_concurrency)
+                if (op(this->__elements[i], result))
+                    result = this->__elements[i];
+            ans = result;
+        };
+
+        T *results = new T[this->__hardware_concurrency];
+        std::thread *workers = new std::thread[this->__hardware_concurrency];
+
+        for (unsigned i = 0; i < this->__hardware_concurrency; ++i)
+            workers[i] = std::thread(find_max, i, std::ref(results[i]));
+        for (unsigned i = 0; i < this->__hardware_concurrency; ++i)
+            workers[i].join();
+
+        T result = results[0];
+        for (unsigned i = 1; i < this->__hardware_concurrency; ++i)
+            if (op(results[i], result))
+                result = results[i];
+
+        delete[] results;
+        delete[] workers;
+        return result;
+    }
+
+    T max_singlethread()
+    {
+        return (*std::max_element(this->__elements, this->__elements + this->__size));
     }
 };
 
