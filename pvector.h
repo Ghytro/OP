@@ -85,6 +85,14 @@ public:
         }
     }
 
+    void clear()
+    {
+        delete[] this->__elements;
+        this->__elements = new T[1];
+        this->__capacity = 1;
+        this->__size = 0;
+    }
+
     void pop_back(T &ref)
     {
         ref = this->__elements[--this->__size];
@@ -325,6 +333,73 @@ public:
     T max_singlethread()
     {
         return (*std::max_element(this->__elements, this->__elements + this->__size));
+    }
+
+    void sort()
+    {
+        auto partial_sort = [](T *array, T **buffer, uint64_t begin, uint64_t end){
+            uint64_t buf_sz = end - begin;
+            T *buf = new T[buf_sz];
+            for (uint64_t i = begin; i < end; ++i)
+                buf[i - begin] = array[i];
+            std::sort(buf, buf + buf_sz);
+            *buffer = buf;
+        };
+
+        T *buf1, *buf2;
+        std::thread t1(partial_sort, this->__elements, &buf1, 0, this->__size / 2);
+        std::thread t2(partial_sort, this->__elements, &buf2, this->__size / 2, this->__size);
+        t1.join();
+        t2.join();
+        uint64_t buf1_sz = this->__size / 2,
+                 buf2_sz = this->__size - this->__size / 2;
+        uint64_t ind1 = 0, ind2 = 0, index = 0;
+        while (ind1 < buf1_sz && ind2 < buf2_sz)
+        {
+            if (buf1[ind1] < buf2[ind2])
+                this->__elements[index++] = buf1[ind1++];
+            else
+                this->__elements[index++] = buf2[ind2++];
+        }
+        while (ind1 < buf1_sz)
+            this->__elements[index++] = buf1[ind1++];
+        while (ind2 < buf2_sz)
+            this->__elements[index++] = buf2[ind2++];
+        delete[] buf1; delete[] buf2;
+    }
+
+    template <class Compare>
+    void sort(Compare comp)
+    {
+        auto partial_sort = [comp](T *array, T **buffer, uint64_t begin, uint64_t end){
+            uint64_t buf_sz = end - begin;
+            T *buf = new T[buf_sz];
+            for (uint64_t i = begin; i < end; ++i)
+                buf[i - begin] = array[i];
+            std::sort(buf, buf + buf_sz, comp);
+            *buffer = buf;
+        };
+
+        T *buf1, *buf2;
+        std::thread t1(partial_sort, this->__elements, &buf1, 0, this->__size / 2);
+        std::thread t2(partial_sort, this->__elements, &buf2, this->__size / 2, this->__size);
+        t1.join();
+        t2.join();
+        uint64_t buf1_sz = this->__size / 2,
+                 buf2_sz = this->__size - this->__size / 2;
+        uint64_t ind1 = 0, ind2 = 0, index = 0;
+        while (ind1 < buf1_sz && ind2 < buf2_sz)
+        {
+            if (comp(buf1[ind1], buf2[ind2]))
+                this->__elements[index++] = buf1[ind1++];
+            else
+                this->__elements[index++] = buf2[ind2++];
+        }
+        while (ind1 < buf1_sz)
+            this->__elements[index++] = buf1[ind1++];
+        while (ind2 < buf2_sz)
+            this->__elements[index++] = buf2[ind2++];
+        delete[] buf1; delete[] buf2;
     }
 
 private:
